@@ -475,6 +475,130 @@ canvas {
   .section { padding: 12px 16px; }
   .header-title { font-size: 13px; }
 }
+
+/* Auto-capture */
+.auto-capture-row {
+  padding: 0 20px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toggle-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-track {
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.08);
+  position: relative;
+  transition: background 0.2s;
+}
+.toggle-track.on {
+  background: rgba(0,230,200,0.25);
+}
+
+.toggle-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.3);
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: all 0.2s;
+}
+.toggle-track.on .toggle-thumb {
+  left: 18px;
+  background: var(--accent);
+}
+
+.toggle-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: rgba(255,255,255,0.3);
+}
+.toggle-label.on { color: var(--accent); }
+
+.auto-status {
+  font-size: 10px;
+  color: rgba(255,255,255,0.2);
+  margin-left: 4px;
+}
+.auto-status.listening { color: rgba(0,230,200,0.5); }
+.auto-status.triggered { color: var(--peak); }
+
+.sensitivity-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.sensitivity-label {
+  font-size: 10px;
+  color: rgba(255,255,255,0.25);
+}
+
+.sensitivity-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 80px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.08);
+  outline: none;
+}
+.sensitivity-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+/* Flash overlay on auto-capture */
+.capture-flash {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+  z-index: 100;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.capture-flash.active {
+  opacity: 1;
+  background: radial-gradient(ellipse at center, rgba(0,230,200,0.08) 0%, transparent 70%);
+}
+
+/* Auto badge in history */
+.auto-badge {
+  font-size: 8px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: rgba(0,230,200,0.1);
+  border: 1px solid rgba(0,230,200,0.2);
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+@media (max-width: 480px) {
+  .auto-capture-row { padding: 0 16px 10px; }
+  .sensitivity-wrap { margin-left: 0; margin-top: 4px; }
+  .auto-capture-row { flex-wrap: wrap; }
+}
 </style>
 </head>
 <body>
@@ -538,6 +662,24 @@ canvas {
   <button class="range-btn" data-range="20000">20k</button>
 </div>
 
+<!-- Auto-Capture -->
+<div class="auto-capture-row">
+  <div class="toggle-wrap" id="autoToggle">
+    <div class="toggle-track" id="autoTrack">
+      <div class="toggle-thumb"></div>
+    </div>
+    <span class="toggle-label" id="autoLabel">Auto-Capture</span>
+  </div>
+  <span class="auto-status" id="autoStatus"></span>
+  <div class="sensitivity-wrap">
+    <span class="sensitivity-label">Sensitivity</span>
+    <input type="range" class="sensitivity-slider" id="sensitivitySlider" min="4" max="24" value="12" step="1">
+  </div>
+</div>
+
+<!-- Flash overlay -->
+<div class="capture-flash" id="captureFlash"></div>
+
 <!-- Canvas -->
 <div class="canvas-wrap">
   <canvas id="mainCanvas" width="900" height="300"></canvas>
@@ -593,6 +735,19 @@ let fundamentalFreq = null;
 let rmsLevel = -100;
 let history = [];
 let spectrogramCol = 0;
+
+// ─── Auto-Capture State ───
+let autoCapture = false;
+let prevRms = -100;
+let rmsBaseline = -100;       // rolling ambient noise floor
+let baselineAlpha = 0.995;    // slow-tracking EMA for baseline
+let transientState = 'idle';  // idle → armed → cooldown
+let transientArmedAt = 0;     // timestamp when spike detected
+let TRANSIENT_THRESHOLD_DB = 12;   // dB jump above baseline to trigger
+const CAPTURE_DELAY_MS = 80;         // ms after spike to capture (let resonance develop)
+const COOLDOWN_MS = 600;             // min ms between auto-captures
+let lastAutoCaptureTime = 0;
+let autoFlashTimeout = null;
 
 // ─── DOM ───
 const $ = id => document.getElementById(id);
@@ -705,6 +860,55 @@ function drawLoop() {
   $('meterFill').style.width = meterW + '%';
   $('meterFill').style.background = meterColor;
   $('rmsLabel').textContent = rmsLevel > -100 ? rmsLevel.toFixed(1) + ' dBFS' : '';
+
+  // ─── Auto-Capture Transient Detection ───
+  if (autoCapture && isRunning) {
+    // Update baseline (slow-tracking ambient noise floor)
+    if (rmsBaseline < -99) {
+      rmsBaseline = rmsLevel; // initialize
+    } else {
+      // Only track baseline when NOT in a transient event
+      if (transientState === 'idle') {
+        rmsBaseline = rmsBaseline * baselineAlpha + rmsLevel * (1 - baselineAlpha);
+      }
+    }
+    
+    const jump = rmsLevel - rmsBaseline;
+    const now = performance.now();
+    
+    if (transientState === 'idle') {
+      if (jump > TRANSIENT_THRESHOLD_DB && (now - lastAutoCaptureTime) > COOLDOWN_MS) {
+        transientState = 'armed';
+        transientArmedAt = now;
+        $('autoStatus').textContent = '● Impact detected';
+        $('autoStatus').className = 'auto-status triggered';
+      } else {
+        $('autoStatus').textContent = 'Listening...';
+        $('autoStatus').className = 'auto-status listening';
+      }
+    } else if (transientState === 'armed') {
+      if (now - transientArmedAt >= CAPTURE_DELAY_MS) {
+        // Capture now — resonance has had time to develop
+        if (fundamentalFreq) {
+          doCapture(true);
+          // Flash
+          $('captureFlash').classList.add('active');
+          clearTimeout(autoFlashTimeout);
+          autoFlashTimeout = setTimeout(() => $('captureFlash').classList.remove('active'), 200);
+        }
+        lastAutoCaptureTime = now;
+        transientState = 'cooldown';
+        setTimeout(() => {
+          transientState = 'idle';
+          if (autoCapture) {
+            $('autoStatus').textContent = 'Listening...';
+            $('autoStatus').className = 'auto-status listening';
+          }
+        }, COOLDOWN_MS);
+      }
+    }
+  }
+  prevRms = rmsLevel;
 
   // Peaks
   peaks = detectPeaks(freqData);
@@ -871,7 +1075,7 @@ function renderHistory() {
   list.innerHTML = history.map(e => `
     <div class="history-entry">
       <div>
-        <div class="history-freq">${formatFreq(e.fundamental)}</div>
+        <div class="history-freq">${formatFreq(e.fundamental)}${e.auto ? '<span class="auto-badge">auto</span>' : ''}</div>
         <div class="history-meta">${e.timestamp} · ${e.rms.toFixed(1)} dBFS</div>
       </div>
       <div class="history-peaks">
@@ -884,18 +1088,43 @@ function renderHistory() {
 // ─── Events ───
 $('btnStart').addEventListener('click', () => isRunning ? stopAudio() : startAudio());
 
-$('btnCapture').addEventListener('click', () => {
+// Shared capture function
+function doCapture(isAuto) {
   if (!fundamentalFreq) return;
   history.unshift({
     id: Date.now(),
     timestamp: new Date().toLocaleString(),
     fundamental: fundamentalFreq,
     peaks: peaks.slice(0, 5).map(p => ({ freq: p.freq, magnitude: p.magnitude })),
-    rms: rmsLevel
+    rms: rmsLevel,
+    auto: !!isAuto
   });
   if (history.length > 50) history = history.slice(0, 50);
   saveHistory();
   renderHistory();
+}
+
+$('btnCapture').addEventListener('click', () => doCapture(false));
+
+// Auto-capture toggle
+$('autoToggle').addEventListener('click', () => {
+  autoCapture = !autoCapture;
+  $('autoTrack').classList.toggle('on', autoCapture);
+  $('autoLabel').classList.toggle('on', autoCapture);
+  if (autoCapture) {
+    rmsBaseline = rmsLevel; // reset baseline
+    transientState = 'idle';
+    $('autoStatus').textContent = 'Listening...';
+    $('autoStatus').className = 'auto-status listening';
+  } else {
+    $('autoStatus').textContent = '';
+    $('autoStatus').className = 'auto-status';
+  }
+});
+
+// Sensitivity slider
+$('sensitivitySlider').addEventListener('input', (e) => {
+  TRANSIENT_THRESHOLD_DB = parseInt(e.target.value);
 });
 
 $('btnHistory').addEventListener('click', () => {
