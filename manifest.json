@@ -1,0 +1,24 @@
+{
+  "name": "Natural Frequency Diagnostics",
+  "short_name": "FreqDiag",
+  "description": "Real-time FFT analyzer for natural frequency detection and sound diagnostics",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#08080d",
+  "theme_color": "#08080d",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

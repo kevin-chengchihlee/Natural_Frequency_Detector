@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#08080d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FreqDiag">
+<meta name="description" content="Real-time FFT natural frequency diagnostics tool">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Natural Frequency Diagnostics</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Grotesk:wght@300;500;700&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #08080d;
+  --surface: #0a0a0f;
+  --border: rgba(255,255,255,0.06);
+  --text: #e0e0e8;
+  --text-dim: rgba(255,255,255,0.3);
+  --text-muted: rgba(255,255,255,0.15);
+  --accent: #00e6c8;
+  --accent-dim: rgba(0,230,200,0.1);
+  --accent-border: rgba(0,230,200,0.2);
+  --peak: #ff5078;
+  --peak-dim: rgba(255,80,120,0.06);
+  --peak-border: rgba(255,80,120,0.15);
+  --warn: #ffb43c;
+  --warn-dim: rgba(255,180,60,0.6);
+  --purple: #a080ff;
+  --purple-dim: rgba(100,64,255,0.15);
+  --purple-border: rgba(100,64,255,0.3);
+  --danger: #ff3050;
+  --mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+  --sans: 'Space Grotesk', system-ui, sans-serif;
+}
+
+body {
+  font-family: var(--mono);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: var(--mono);
+  cursor: pointer;
+  border: none;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Header */
+.header {
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--accent-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 10;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent), #6040ff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.header-title {
+  font-size: 15px;
+  font-weight: 700;
+  font-family: var(--sans);
+  letter-spacing: -0.5px;
+}
+
+.header-sub {
+  font-size: 9px;
+  color: rgba(0,230,200,0.5);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.btn-history {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+.btn-history.active {
+  background: var(--accent-dim);
+}
+
+.btn-start {
+  background: linear-gradient(135deg, var(--accent), #00b4ff);
+  color: var(--bg);
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.btn-start.running {
+  background: rgba(255,60,90,0.2);
+  color: var(--danger);
+}
+
+/* Error */
+.error-bar {
+  padding: 12px 20px;
+  background: rgba(255,50,80,0.1);
+  color: #ff5070;
+  font-size: 12px;
+  display: none;
+}
+.error-bar.visible { display: block; }
+
+/* Readout */
+.readout {
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.readout-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 4px;
+}
+
+.readout-value {
+  font-size: 30px;
+  font-weight: 700;
+  font-family: var(--sans);
+  letter-spacing: -1px;
+  color: var(--peak);
+}
+
+.readout-note {
+  font-size: 12px;
+  color: var(--warn-dim);
+  margin-top: 2px;
+}
+
+.level-meter {
+  flex: 1;
+  min-width: 120px;
+}
+
+.meter-bar-bg {
+  height: 6px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.meter-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.05s;
+  background: var(--accent);
+}
+
+.btn-capture {
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-border);
+  color: var(--accent);
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.btn-capture:disabled {
+  background: rgba(255,255,255,0.03);
+  color: rgba(255,255,255,0.2);
+  border-color: var(--border);
+  cursor: default;
+}
+
+/* Controls */
+.controls {
+  padding: 0 20px 12px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.ctrl-btn {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  color: rgba(255,255,255,0.4);
+  padding: 5px 12px;
+  border-radius: 5px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.ctrl-btn.active {
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.ctrl-sep {
+  color: var(--text-muted);
+  margin: 0 2px;
+  user-select: none;
+}
+
+.ctrl-label {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.range-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+}
+.range-btn.active {
+  background: var(--purple-dim);
+  border-color: var(--purple-border);
+  color: var(--purple);
+}
+
+/* Canvas */
+.canvas-wrap {
+  padding: 0 20px;
+}
+
+canvas {
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  display: block;
+}
+
+#spectrogramCanvas {
+  margin-top: 8px;
+  display: none;
+}
+#spectrogramCanvas.visible { display: block; }
+
+/* Peaks */
+.section {
+  padding: 16px 20px;
+}
+
+.section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.peaks-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 6px;
+}
+
+.peak-card {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.04);
+  border-radius: 6px;
+  padding: 8px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.peak-card.primary {
+  background: var(--peak-dim);
+  border-color: var(--peak-border);
+}
+
+.peak-freq {
+  font-size: 14px;
+  font-weight: 600;
+}
+.peak-card.primary .peak-freq { color: var(--peak); }
+
+.peak-note {
+  font-size: 10px;
+  color: var(--warn-dim);
+}
+
+.peak-db {
+  font-size: 11px;
+  color: rgba(255,255,255,0.4);
+}
+
+.placeholder {
+  font-size: 12px;
+  color: rgba(255,255,255,0.2);
+  padding: 8px 0;
+}
+
+/* Harmonics */
+.harmonics {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.harmonic-tag {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.2);
+}
+.harmonic-tag.found {
+  background: rgba(0,230,200,0.08);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+/* History */
+.history-panel {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  display: none;
+}
+.history-panel.visible { display: block; }
+
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.btn-clear {
+  background: rgba(255,50,80,0.1);
+  border: 1px solid rgba(255,50,80,0.2);
+  color: #ff5070;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 10px;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.history-entry {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.04);
+  border-radius: 6px;
+  padding: 10px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.history-freq {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--peak);
+}
+
+.history-meta {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.history-peaks {
+  display: flex;
+  gap: 6px;
+}
+
+.history-peak-tag {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.4);
+}
+
+/* Footer */
+.footer {
+  padding: 16px 20px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* Install prompt */
+.install-banner {
+  padding: 10px 20px;
+  background: rgba(100,64,255,0.08);
+  border-bottom: 1px solid var(--purple-border);
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--purple);
+}
+.install-banner.visible { display: flex; }
+
+.btn-install {
+  background: var(--purple-dim);
+  border: 1px solid var(--purple-border);
+  color: var(--purple);
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.btn-dismiss {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.3);
+  font-size: 16px;
+  padding: 4px;
+  line-height: 1;
+}
+
+@media (max-width: 480px) {
+  .header { padding: 12px 16px 10px; }
+  .readout { padding: 12px 16px; gap: 14px; }
+  .readout-value { font-size: 24px; }
+  .controls { padding: 0 16px 10px; }
+  .canvas-wrap { padding: 0 16px; }
+  .section { padding: 12px 16px; }
+  .header-title { font-size: 13px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Install Banner -->
+<div class="install-banner" id="installBanner">
+  <span>Install this app for quick access</span>
+  <div style="display:flex;gap:8px;">
+    <button class="btn-install" id="btnInstall">Install</button>
+    <button class="btn-dismiss" id="btnDismissInstall">×</button>
+  </div>
+</div>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-left">
+    <div class="logo">∿</div>
+    <div>
+      <div class="header-title">Natural Frequency Diagnostics</div>
+      <div class="header-sub" id="headerSub">FFT Analyzer · 8192-pt · 5.4 Hz res</div>
+    </div>
+  </div>
+  <div class="header-actions">
+    <button class="btn-history" id="btnHistory">History (<span id="historyCount">0</span>)</button>
+    <button class="btn-start" id="btnStart">● Start</button>
+  </div>
+</div>
+
+<!-- Error -->
+<div class="error-bar" id="errorBar"></div>
+
+<!-- Readout -->
+<div class="readout">
+  <div>
+    <div class="readout-label" style="color:rgba(255,80,120,0.6);">Fundamental</div>
+    <div class="readout-value" id="fundFreq">—</div>
+    <div class="readout-note" id="fundNote"></div>
+  </div>
+  <div class="level-meter">
+    <div class="readout-label" style="color:var(--text-dim);">
+      Level <span id="rmsLabel"></span>
+    </div>
+    <div class="meter-bar-bg">
+      <div class="meter-bar-fill" id="meterFill" style="width:0%"></div>
+    </div>
+  </div>
+  <button class="btn-capture" id="btnCapture" disabled>⬇ Capture</button>
+</div>
+
+<!-- Controls -->
+<div class="controls">
+  <button class="ctrl-btn active" data-mode="spectrum">Spectrum</button>
+  <button class="ctrl-btn" data-mode="spectrogram">Spectrogram</button>
+  <button class="ctrl-btn" data-mode="waveform">Waveform</button>
+  <span class="ctrl-sep">│</span>
+  <span class="ctrl-label">Range:</span>
+  <button class="range-btn" data-range="1000">1k</button>
+  <button class="range-btn" data-range="2000">2k</button>
+  <button class="range-btn active" data-range="4000">4k</button>
+  <button class="range-btn" data-range="8000">8k</button>
+  <button class="range-btn" data-range="20000">20k</button>
+</div>
+
+<!-- Canvas -->
+<div class="canvas-wrap">
+  <canvas id="mainCanvas" width="900" height="300"></canvas>
+  <canvas id="spectrogramCanvas" width="900" height="150"></canvas>
+</div>
+
+<!-- Peaks -->
+<div class="section">
+  <div class="section-title">Detected Peaks</div>
+  <div class="peaks-grid" id="peaksGrid">
+    <div class="placeholder">Press Start to begin analysis</div>
+  </div>
+</div>
+
+<!-- Harmonics -->
+<div class="section" id="harmonicsSection" style="display:none;">
+  <div class="section-title">Harmonic Analysis</div>
+  <div class="harmonics" id="harmonicsContainer"></div>
+</div>
+
+<!-- History -->
+<div class="history-panel" id="historyPanel">
+  <div class="history-header">
+    <div class="section-title" style="margin:0;">Capture History</div>
+    <button class="btn-clear" id="btnClear">Clear All</button>
+  </div>
+  <div class="history-list" id="historyList">
+    <div class="placeholder">No captures yet. Hit "Capture" during analysis.</div>
+  </div>
+</div>
+
+<!-- Footer -->
+<div class="footer" id="footer">
+  FFT Size: 8192 · Bin Resolution: 5.38 Hz · Smoothing: 0.8 · Range: 20 Hz – 20 kHz
+</div>
+
+<script>
+// ─── Config ───
+const FFT_SIZE = 8192;
+const SAMPLE_RATE = 44100;
+const SMOOTHING = 0.8;
+const PEAK_THRESHOLD_DB = -60;
+const MIN_PEAK_DISTANCE_HZ = 20;
+const BIN_WIDTH = SAMPLE_RATE / FFT_SIZE;
+
+// ─── State ───
+let isRunning = false;
+let audioCtx, analyser, source, stream, animFrame;
+let viewMode = 'spectrum';
+let maxFreqDisplay = 4000;
+let peaks = [];
+let fundamentalFreq = null;
+let rmsLevel = -100;
+let history = [];
+let spectrogramCol = 0;
+
+// ─── DOM ───
+const $ = id => document.getElementById(id);
+const mainCanvas = $('mainCanvas');
+const sgCanvas = $('spectrogramCanvas');
+const ctx = mainCanvas.getContext('2d');
+const sgCtx = sgCanvas.getContext('2d');
+
+// ─── Helpers ───
+function hzToNote(hz) {
+  if (hz <= 0) return '';
+  const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  const semi = 12 * Math.log2(hz / 440);
+  const idx = Math.round(semi) + 69;
+  const oct = Math.floor(idx / 12) - 1;
+  const name = names[((idx % 12) + 12) % 12];
+  const cents = Math.round((semi - Math.round(semi)) * 100);
+  return `${name}${oct} ${cents >= 0 ? '+' : ''}${cents}¢`;
+}
+
+function formatFreq(hz) {
+  return hz >= 1000 ? (hz/1000).toFixed(2) + ' kHz' : hz.toFixed(1) + ' Hz';
+}
+
+function detectPeaks(freqData) {
+  const found = [];
+  for (let i = 2; i < freqData.length - 2; i++) {
+    const v = freqData[i];
+    if (v < PEAK_THRESHOLD_DB) continue;
+    if (v > freqData[i-1] && v > freqData[i+1] && v > freqData[i-2] && v > freqData[i+2]) {
+      const freq = i * BIN_WIDTH;
+      if (freq < 20 || freq > 20000) continue;
+      if (found.length > 0) {
+        const last = found[found.length - 1];
+        if (freq - last.freq < MIN_PEAK_DISTANCE_HZ) {
+          if (v > last.magnitude) found[found.length - 1] = { freq, magnitude: v, bin: i };
+          continue;
+        }
+      }
+      found.push({ freq, magnitude: v, bin: i });
+    }
+  }
+  found.sort((a, b) => b.magnitude - a.magnitude);
+  return found.slice(0, 8);
+}
+
+// ─── Storage ───
+function saveHistory() {
+  try { localStorage.setItem('fft-history', JSON.stringify(history)); } catch(e) {}
+}
+function loadHistory() {
+  try {
+    const d = localStorage.getItem('fft-history');
+    if (d) history = JSON.parse(d);
+  } catch(e) {}
+  renderHistory();
+}
+
+// ─── Audio ───
+async function startAudio() {
+  try {
+    $('errorBar').classList.remove('visible');
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, sampleRate: SAMPLE_RATE }
+    });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = FFT_SIZE;
+    analyser.smoothingTimeConstant = SMOOTHING;
+    source = audioCtx.createMediaStreamSource(stream);
+    source.connect(analyser);
+    isRunning = true;
+    spectrogramCol = 0;
+    sgCtx.fillStyle = '#0a0a0f';
+    sgCtx.fillRect(0, 0, sgCanvas.width, sgCanvas.height);
+    $('btnStart').textContent = '■ Stop';
+    $('btnStart').classList.add('running');
+    drawLoop();
+  } catch(e) {
+    $('errorBar').textContent = 'Microphone access denied. Please allow mic permissions.';
+    $('errorBar').classList.add('visible');
+  }
+}
+
+function stopAudio() {
+  if (animFrame) cancelAnimationFrame(animFrame);
+  if (source) source.disconnect();
+  if (audioCtx) audioCtx.close();
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  isRunning = false;
+  $('btnStart').textContent = '● Start';
+  $('btnStart').classList.remove('running');
+}
+
+// ─── Draw ───
+function drawLoop() {
+  animFrame = requestAnimationFrame(drawLoop);
+  const bufLen = analyser.frequencyBinCount;
+  const freqData = new Float32Array(bufLen);
+  const timeData = new Float32Array(analyser.fftSize);
+  analyser.getFloatFrequencyData(freqData);
+  analyser.getFloatTimeDomainData(timeData);
+
+  // RMS
+  let sum = 0;
+  for (let i = 0; i < timeData.length; i++) sum += timeData[i] * timeData[i];
+  rmsLevel = 20 * Math.log10(Math.sqrt(sum / timeData.length) + 1e-10);
+  const meterW = Math.max(0, Math.min(100, (rmsLevel + 80) / 60 * 100));
+  const meterColor = rmsLevel > -10 ? '#ff3050' : rmsLevel > -30 ? '#ffb43c' : '#00e6c8';
+  $('meterFill').style.width = meterW + '%';
+  $('meterFill').style.background = meterColor;
+  $('rmsLabel').textContent = rmsLevel > -100 ? rmsLevel.toFixed(1) + ' dBFS' : '';
+
+  // Peaks
+  peaks = detectPeaks(freqData);
+  fundamentalFreq = peaks.length > 0 ? peaks[0].freq : null;
+  $('fundFreq').textContent = fundamentalFreq ? formatFreq(fundamentalFreq) : '—';
+  $('fundNote').textContent = fundamentalFreq ? hzToNote(fundamentalFreq) : '';
+  $('btnCapture').disabled = !fundamentalFreq;
+  renderPeaks();
+  renderHarmonics();
+
+  const W = mainCanvas.width, H = mainCanvas.height;
+  ctx.fillStyle = '#0a0a0f';
+  ctx.fillRect(0, 0, W, H);
+
+  if (viewMode === 'spectrum' || viewMode === 'spectrogram') {
+    const maxBin = Math.min(Math.ceil(maxFreqDisplay / BIN_WIDTH), bufLen);
+
+    // Grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1;
+    for (let db = -100; db <= 0; db += 10) {
+      const y = H - ((db + 100) / 100) * H;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+
+    const freqStep = maxFreqDisplay <= 2000 ? 200 : maxFreqDisplay <= 5000 ? 500 : maxFreqDisplay <= 10000 ? 1000 : 2000;
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.font = '10px JetBrains Mono, monospace';
+    for (let f = freqStep; f < maxFreqDisplay; f += freqStep) {
+      const x = (f / maxFreqDisplay) * W;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+      ctx.fillText(f >= 1000 ? (f/1000)+'k' : f+'', x+2, H-4);
+    }
+    for (let db = -90; db <= -10; db += 10) {
+      const y = H - ((db+100)/100)*H;
+      ctx.fillText(db+'dB', 2, y-2);
+    }
+
+    // Fill
+    const grad = ctx.createLinearGradient(0, H, 0, 0);
+    grad.addColorStop(0, 'rgba(0,240,200,0.02)');
+    grad.addColorStop(0.4, 'rgba(0,240,200,0.08)');
+    grad.addColorStop(0.7, 'rgba(0,200,255,0.15)');
+    grad.addColorStop(1, 'rgba(180,100,255,0.2)');
+    ctx.beginPath(); ctx.moveTo(0, H);
+    for (let i = 0; i < maxBin; i++) {
+      const x = (i/maxBin)*W;
+      const y = H - ((Math.max(freqData[i],-100)+100)/100)*H;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(W, H); ctx.closePath();
+    ctx.fillStyle = grad; ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    for (let i = 0; i < maxBin; i++) {
+      const x = (i/maxBin)*W;
+      const y = H - ((Math.max(freqData[i],-100)+100)/100)*H;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = 'rgba(0,230,200,0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Peak markers
+    peaks.slice(0, 5).forEach((p, idx) => {
+      const x = (p.freq / maxFreqDisplay) * W;
+      const y = H - ((p.magnitude+100)/100)*H;
+      if (x < 0 || x > W) return;
+      ctx.beginPath();
+      ctx.arc(x, y, idx === 0 ? 6 : 4, 0, Math.PI*2);
+      ctx.fillStyle = idx === 0 ? 'rgba(255,80,120,0.9)' : 'rgba(255,180,60,0.7)';
+      ctx.fill();
+      ctx.strokeStyle = idx === 0 ? '#ff5078' : '#ffb43c';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold ${idx === 0 ? 12 : 10}px JetBrains Mono, monospace`;
+      const tx = Math.min(x+8, W-70);
+      ctx.fillText(formatFreq(p.freq), tx, y-8);
+      if (idx === 0) {
+        ctx.fillStyle = 'rgba(255,80,120,0.7)';
+        ctx.font = '10px JetBrains Mono, monospace';
+        ctx.fillText(hzToNote(p.freq), tx, y-20);
+      }
+    });
+
+    // Spectrogram
+    if (viewMode === 'spectrogram') {
+      const sW = sgCanvas.width, sH = sgCanvas.height;
+      const col = spectrogramCol % sW;
+      for (let i = 0; i < sH; i++) {
+        const bin = Math.floor((i/sH)*maxBin);
+        const norm = Math.max(0, Math.min(1, (Math.max(freqData[bin],-100)+100)/70));
+        const r = Math.floor(norm*200 + (norm > 0.7 ? (norm-0.7)*180 : 0));
+        const g = Math.floor(norm*230);
+        const b = Math.floor(100 + norm*155);
+        sgCtx.fillStyle = `rgb(${r},${g},${b})`;
+        sgCtx.fillRect(col, sH-i-1, 2, 1);
+      }
+      sgCtx.fillStyle = 'rgba(255,255,255,0.5)';
+      sgCtx.fillRect((col+2)%sW, 0, 1, sH);
+      spectrogramCol = col + 2;
+    }
+  } else {
+    // Waveform
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, H/2); ctx.lineTo(W, H/2); ctx.stroke();
+    ctx.beginPath();
+    const sw = W / timeData.length;
+    for (let i = 0; i < timeData.length; i++) {
+      const x = i*sw, y = (1-timeData[i])*H*0.5;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = '#00e6c8';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+}
+
+// ─── Render Peaks ───
+function renderPeaks() {
+  const grid = $('peaksGrid');
+  if (peaks.length === 0) {
+    if (!isRunning) grid.innerHTML = '<div class="placeholder">Press Start to begin analysis</div>';
+    else grid.innerHTML = '<div class="placeholder">Listening...</div>';
+    return;
+  }
+  grid.innerHTML = peaks.slice(0, 6).map((p, i) => `
+    <div class="peak-card ${i === 0 ? 'primary' : ''}">
+      <div>
+        <div class="peak-freq">${formatFreq(p.freq)}</div>
+        <div class="peak-note">${hzToNote(p.freq)}</div>
+      </div>
+      <div class="peak-db">${p.magnitude.toFixed(1)} dB</div>
+    </div>
+  `).join('');
+}
+
+// ─── Render Harmonics ───
+function renderHarmonics() {
+  const sec = $('harmonicsSection');
+  if (!fundamentalFreq || peaks.length < 2) { sec.style.display = 'none'; return; }
+  sec.style.display = 'block';
+  const container = $('harmonicsContainer');
+  container.innerHTML = [2,3,4,5,6].map(n => {
+    const expected = fundamentalFreq * n;
+    const found = peaks.find(p => Math.abs(p.freq - expected) < expected * 0.04);
+    return `<div class="harmonic-tag ${found ? 'found' : ''}">
+      ${n}× ${formatFreq(expected)} ${found ? '(' + found.magnitude.toFixed(0) + ' dB)' : '—'}
+    </div>`;
+  }).join('');
+}
+
+// ─── Render History ───
+function renderHistory() {
+  $('historyCount').textContent = history.length;
+  const list = $('historyList');
+  if (history.length === 0) {
+    list.innerHTML = '<div class="placeholder">No captures yet. Hit "Capture" during analysis.</div>';
+    return;
+  }
+  list.innerHTML = history.map(e => `
+    <div class="history-entry">
+      <div>
+        <div class="history-freq">${formatFreq(e.fundamental)}</div>
+        <div class="history-meta">${e.timestamp} · ${e.rms.toFixed(1)} dBFS</div>
+      </div>
+      <div class="history-peaks">
+        ${e.peaks.slice(0, 3).map(p => `<span class="history-peak-tag">${formatFreq(p.freq)}</span>`).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+// ─── Events ───
+$('btnStart').addEventListener('click', () => isRunning ? stopAudio() : startAudio());
+
+$('btnCapture').addEventListener('click', () => {
+  if (!fundamentalFreq) return;
+  history.unshift({
+    id: Date.now(),
+    timestamp: new Date().toLocaleString(),
+    fundamental: fundamentalFreq,
+    peaks: peaks.slice(0, 5).map(p => ({ freq: p.freq, magnitude: p.magnitude })),
+    rms: rmsLevel
+  });
+  if (history.length > 50) history = history.slice(0, 50);
+  saveHistory();
+  renderHistory();
+});
+
+$('btnHistory').addEventListener('click', () => {
+  const panel = $('historyPanel');
+  const btn = $('btnHistory');
+  panel.classList.toggle('visible');
+  btn.classList.toggle('active');
+});
+
+$('btnClear').addEventListener('click', () => {
+  history = [];
+  saveHistory();
+  renderHistory();
+});
+
+// View mode buttons
+document.querySelectorAll('.ctrl-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.ctrl-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    viewMode = btn.dataset.mode;
+    $('spectrogramCanvas').classList.toggle('visible', viewMode === 'spectrogram');
+    if (viewMode === 'spectrogram') {
+      spectrogramCol = 0;
+      sgCtx.fillStyle = '#0a0a0f';
+      sgCtx.fillRect(0, 0, sgCanvas.width, sgCanvas.height);
+    }
+  });
+});
+
+// Range buttons
+document.querySelectorAll('.range-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    maxFreqDisplay = parseInt(btn.dataset.range);
+  });
+});
+
+// ─── PWA Install ───
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  $('installBanner').classList.add('visible');
+});
+
+$('btnInstall').addEventListener('click', async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const result = await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  $('installBanner').classList.remove('visible');
+});
+
+$('btnDismissInstall').addEventListener('click', () => {
+  $('installBanner').classList.remove('visible');
+});
+
+window.addEventListener('appinstalled', () => {
+  $('installBanner').classList.remove('visible');
+});
+
+// ─── Init ───
+loadHistory();
+
+// Register service worker
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
